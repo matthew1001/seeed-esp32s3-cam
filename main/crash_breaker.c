@@ -174,21 +174,40 @@ void crash_breaker_recovery_poll(uint32_t uptime_s)
     }
 
     if (!s_lan_try || in_ap_with_sta_cfg) {
-        /* 任何原因处于 AP-only 且已配置 STA：5 分钟后自动重启尝试入网 */
+        /* 任何原因处于 AP-only 且已配置 STA：5 分钟后完全解除 limp 并重启入网 */
         if (uptime_s < LAN_RETRY_UPTIME_S) {
             nvs_close(h);
             return;
         }
-        if (s_limp) {
-            nvs_set_u8(h, BRK_KEY_TRY, 1);
+        uint8_t bak = 0;
+        nvs_get_u8(h, BRK_KEY_BAK, &bak);
+        if (bak) {
+            uint8_t b_fs = SAFE_FRAMESIZE, b_fps = SAFE_FPS, b_q = SAFE_QUALITY;
+            uint8_t b_dn = SAFE_DAY_NIGHT, b_irg = 0, b_irb = 0;
+            nvs_get_u8(h, BRK_KEY_B_FS, &b_fs);
+            nvs_get_u8(h, BRK_KEY_B_FPS, &b_fps);
+            nvs_get_u8(h, BRK_KEY_B_Q, &b_q);
+            nvs_get_u8(h, BRK_KEY_B_DN, &b_dn);
+            nvs_get_u8(h, BRK_KEY_B_IRG, &b_irg);
+            nvs_get_u8(h, BRK_KEY_B_IRB, &b_irb);
+            cfg->cam_framesize   = b_fs;
+            cfg->cam_fps         = b_fps;
+            cfg->cam_quality     = b_q;
+            cfg->day_night_mode  = b_dn;
+            cfg->ir_gpio         = b_irg;
+            cfg->ir_brightness   = b_irb;
+            config_save();
         }
+        nvs_set_u8(h, BRK_KEY_LIMP, 0);
+        nvs_set_u8(h, BRK_KEY_TRY, 0);
+        nvs_set_u8(h, BRK_KEY_BAK, 0);
+        nvs_set_u8(h, BRK_KEY_CNT, 0);
         nvs_commit(h);
         nvs_close(h);
-        ESP_LOGW(TAG, "SELF-HEAL: %umin clean AP-only uptime — rebooting into "
-                 "LAN-try (SVGA + STA)", LAN_RETRY_UPTIME_S / 60);
-        if (s_limp) {
-            s_lan_try = true;
-        }
+        s_limp = false;
+        s_lan_try = false;
+        ESP_LOGW(TAG, "SELF-HEAL: %umin clean AP-only uptime — limp cleared, "
+                 "rebooting into normal STA mode", LAN_RETRY_UPTIME_S / 60);
         esp_restart();
         return;
     }
