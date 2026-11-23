@@ -363,6 +363,20 @@ esp_err_t wifi_start_ap(void)
     return ESP_OK;
 }
 
+/** @brief 从 AP 模式切换回 STA 模式并连接配置的 WiFi SSID */
+esp_err_t wifi_switch_to_sta(void)
+{
+    cam_config_t *config = config_get();
+    if (!config || strlen(config->wifi_ssid) == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_using_backup_wifi = false;
+    s_network_failures = 0;
+    s_retry_count = 0;
+    s_retry_interval_ms = WIFI_RETRY_MIN_MS;
+    return wifi_start_sta();
+}
+
 /** @brief 启动 WiFi STA 客户端模式，连接配置的路由器 */
 esp_err_t wifi_start_sta(void)
 {

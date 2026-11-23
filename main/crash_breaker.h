@@ -59,3 +59,6 @@ bool crash_breaker_limp_active(void);
 /** 当前是否为 LAN 试运行开机（limp 下的每小时一次回归尝试；
  *  例外：满 30 分钟干净运行后已自动还原用户配置，limp 同时解除） */
 bool crash_breaker_lan_try_active(void);
+
+/** 立即清零 panic_cnt 并解除 limp / try_lan 标志（NVS + 内存状态同步清零）。 */
+void crash_breaker_reset(void);

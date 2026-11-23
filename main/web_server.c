@@ -61,6 +61,7 @@
 #include "nvs.h"          /* /api/logs 的断路器状态（cam_brk 共享命名空间） */
 #include "log_upload.h"   /* 板级扩展（PIT-062）：日志环 + 上报 */
 #include "wifi_channel_health.h"  /* 契约 v1.7 ①b：信道健康快照 */
+#include "crash_breaker.h"
 #include "flash_led.h"    /* 契约 v1.11：/api/led + day_night mode=2 的 IR 补光联动（GPIO5） */
 
 #include "ota_updater.h"
@@ -118,6 +119,8 @@ static esp_err_t api_led_handler(httpd_req_t *req);
 static esp_err_t api_led_get_handler(httpd_req_t *req);
 static esp_err_t api_logs_handler(httpd_req_t *req);
 static esp_err_t api_logs_upload_handler(httpd_req_t *req);
+static esp_err_t api_breaker_reset_handler(httpd_req_t *req);
+static esp_err_t api_wifi_sta_handler(httpd_req_t *req);
 static esp_err_t api_time_handler(httpd_req_t *req);
 static esp_err_t api_record_handler(httpd_req_t *req);
 static esp_err_t api_record_get_handler(httpd_req_t *req);
@@ -164,6 +167,8 @@ static const uri_entry_t s_uris[] = {
     { "/api/led",     HTTP_GET,    api_led_get_handler       },  /* 契约 v1.11 */
     { "/api/logs",    HTTP_GET,    api_logs_handler          },  /* 板级扩展：远程日志环（PIT-062） */
     { "/api/logs/upload", HTTP_POST, api_logs_upload_handler },  /* 板级扩展：手动触发上报 */
+    { "/api/breaker/reset", HTTP_POST, api_breaker_reset_handler },
+    { "/api/wifi/sta", HTTP_POST, api_wifi_sta_handler       },
     /* CORS preflight — wildcard */
     { "/*",            HTTP_OPTIONS, options_handler           },
     /* Static files — catch-all (lowest priority) */
@@ -1544,6 +1549,65 @@ static esp_err_t api_logs_upload_handler(httpd_req_t *req)
     }
     cJSON_AddBoolToObject(data, "queued", log_upload_manual_upload());
     return json_ok(req, data);
+}
+
+/*  POST /api/breaker/reset — 重置 panic_cnt 并解除 limp 模式            */
+
+static esp_err_t api_breaker_reset_handler(httpd_req_t *req)
+{
+    set_cors_headers(req);
+    crash_breaker_reset();
+
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddNumberToObject(data, "panic_cnt", 0);
+    cJSON_AddBoolToObject(data, "limp", false);
+    cJSON_AddBoolToObject(data, "lan_try", false);
+    return json_ok(req, data);
+}
+
+/*  POST /api/wifi/sta — 解除安全态并从 AP 切换回 STA 连接指定 SSID      */
+
+static esp_err_t api_wifi_sta_handler(httpd_req_t *req)
+{
+    set_cors_headers(req);
+
+    cam_config_t *cfg = config_get();
+    char *body = read_body(req, 512);
+    if (body) {
+        cJSON *json = cJSON_Parse(body);
+        free(body);
+        if (json) {
+            config_lock();
+            cJSON *ssid = cJSON_GetObjectItem(json, "wifi_ssid");
+            cJSON *pass = cJSON_GetObjectItem(json, "wifi_pass");
+            if (ssid && cJSON_IsString(ssid) && ssid->valuestring[0] != '\0') {
+                strlcpy(cfg->wifi_ssid, ssid->valuestring, sizeof(cfg->wifi_ssid));
+            }
+            if (pass && cJSON_IsString(pass) && strcmp(pass->valuestring, "****") != 0) {
+                strlcpy(cfg->wifi_pass, pass->valuestring, sizeof(cfg->wifi_pass));
+            }
+            config_save();
+            config_unlock();
+            cJSON_Delete(json);
+        }
+    }
+
+    if (strlen(cfg->wifi_ssid) == 0) {
+        return json_error(req, "No wifi_ssid configured", HTTPD_400_BAD_REQUEST);
+    }
+
+    crash_breaker_reset();
+
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "status", "switching_to_sta");
+    cJSON_AddStringToObject(data, "wifi_ssid", cfg->wifi_ssid);
+    cJSON_AddBoolToObject(data, "rebooting", true);
+    esp_err_t resp = json_ok(req, data);
+
+    ESP_LOGW(TAG, "Switching from AP to STA (SSID=%s) via /api/wifi/sta — rebooting", cfg->wifi_ssid);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return resp;
 }
 
 /* ------------------------------------------------------------------ */

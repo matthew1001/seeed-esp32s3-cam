@@ -21,6 +21,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "wifi_manager.h"
 #include "nvs.h"
 
 #include <string.h>
@@ -54,7 +55,7 @@ static const char *TAG = "crash_brk";
 
 #define PANIC_THRESHOLD      3
 #define RESTORE_UPTIME_S     (30u * 60u)  /* LAN 试运行干净 30min → 全还原 */
-#define LAN_RETRY_UPTIME_S   (60u * 60u)  /* AP-only 干净 60min → 试 LAN */
+#define LAN_RETRY_UPTIME_S   (5u * 60u)   /* AP-only 干净 5min → 试 LAN */
 
 static bool s_limp    = false;
 static bool s_lan_try = false;
@@ -156,27 +157,38 @@ bool crash_breaker_check_and_arm(void)
 
 void crash_breaker_recovery_poll(uint32_t uptime_s)
 {
-    if (!s_limp) {
+    cam_config_t *cfg = config_get();
+    bool in_ap_with_sta_cfg = (wifi_get_state() == WIFI_STATE_AP && strlen(cfg->wifi_ssid) > 0);
+
+    if (!s_limp && !in_ap_with_sta_cfg) {
         return;
     }
 
     nvs_handle_t h;
     if (nvs_open(BRK_NS, NVS_READWRITE, &h) != ESP_OK) {
+        if (in_ap_with_sta_cfg && uptime_s >= LAN_RETRY_UPTIME_S) {
+            ESP_LOGW(TAG, "AP-only uptime %us reached — rebooting to retry STA", (unsigned)uptime_s);
+            esp_restart();
+        }
         return;
     }
 
-    if (!s_lan_try) {
-        /* 安全态（AP-only）：干净 1 小时 → 试一次 LAN */
+    if (!s_lan_try || in_ap_with_sta_cfg) {
+        /* 任何原因处于 AP-only 且已配置 STA：5 分钟后自动重启尝试入网 */
         if (uptime_s < LAN_RETRY_UPTIME_S) {
             nvs_close(h);
             return;
         }
-        nvs_set_u8(h, BRK_KEY_TRY, 1);
+        if (s_limp) {
+            nvs_set_u8(h, BRK_KEY_TRY, 1);
+        }
         nvs_commit(h);
         nvs_close(h);
         ESP_LOGW(TAG, "SELF-HEAL: %umin clean AP-only uptime — rebooting into "
                  "LAN-try (SVGA + STA)", LAN_RETRY_UPTIME_S / 60);
-        s_lan_try = true;
+        if (s_limp) {
+            s_lan_try = true;
+        }
         esp_restart();
         return;
     }
@@ -241,4 +253,20 @@ bool crash_breaker_limp_active(void)
 bool crash_breaker_lan_try_active(void)
 {
     return s_lan_try;
+}
+
+void crash_breaker_reset(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(BRK_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, BRK_KEY_CNT, 0);
+        nvs_set_u8(h, BRK_KEY_LIMP, 0);
+        nvs_set_u8(h, BRK_KEY_TRY, 0);
+        nvs_set_u8(h, BRK_KEY_BAK, 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    s_limp = false;
+    s_lan_try = false;
+    ESP_LOGW(TAG, "Crash breaker manually reset via API (panic_cnt=0, limp=false)");
 }

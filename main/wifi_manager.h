@@ -64,3 +64,6 @@ const char *wifi_get_current_ssid(void);
 /** @brief 当前使用的配置槽位：true=备用网（wifi_ssid_2），false=主网 */
 bool wifi_using_backup(void);
 const char *wifi_get_mdns_hostname(void);
+
+/** @brief 从 AP 模式切换回 STA 模式并立即连接已配置的 WiFi SSID */
+esp_err_t wifi_switch_to_sta(void);
