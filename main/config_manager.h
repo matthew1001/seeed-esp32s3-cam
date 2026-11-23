@@ -100,6 +100,7 @@ typedef struct {
     uint8_t timelapse_burst_count;    // 突发连拍张数（保留字段，本板录像模式暂不使用）
     uint8_t timelapse_mode;           // 0=静态（固定间隔） 1=动态（随运动衰减）
     uint16_t timelapse_min_interval_s;  // 动态模式：有运动时间隔（默认 3）
+    uint32_t timelapse_min_interval_ms; // 动态模式：有运动时间隔毫秒覆盖（0=沿用 _s*1000；83-3600000，83ms≈12fps）
     uint16_t timelapse_max_interval_s;  // 动态模式：无运动衰减上限（默认 300）
     uint8_t timelapse_decay_factor;     // 每衰减周期间隔倍率（默认 2）
     uint16_t timelapse_decay_period_s;  // 无运动多少秒后衰减一步（默认 10）

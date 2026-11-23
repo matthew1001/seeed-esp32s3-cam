@@ -118,6 +118,7 @@ KEY_ASSERT("tl_int_s");
 KEY_ASSERT("tl_burst");
 KEY_ASSERT("tl_mode");
 KEY_ASSERT("tl_min_int_s");
+KEY_ASSERT("tl_min_ms");
 KEY_ASSERT("tl_max_int_s");
 KEY_ASSERT("tl_decay_f");
 KEY_ASSERT("tl_decay_p_s");
@@ -145,6 +146,10 @@ static bool rd_u16(nvs_handle_t h, const char *key, uint16_t *out)
 {
     return nvs_get_u16(h, key, out) == ESP_OK;
 }
+static bool rd_u32(nvs_handle_t h, const char *key, uint32_t *out)
+{
+    return nvs_get_u32(h, key, out) == ESP_OK;
+}
 static bool rd_i8(nvs_handle_t h, const char *key, int8_t *out)
 {
     return nvs_get_i8(h, key, out) == ESP_OK;
@@ -163,6 +168,11 @@ static void wr_u16(nvs_handle_t h, const char *key, uint16_t val)
 {
     esp_err_t ret = nvs_set_u16(h, key, val);
     if (ret != ESP_OK) ESP_LOGW(TAG, "nvs_set_u16(%s) failed: %s", key, esp_err_to_name(ret));
+}
+static void wr_u32(nvs_handle_t h, const char *key, uint32_t val)
+{
+    esp_err_t ret = nvs_set_u32(h, key, val);
+    if (ret != ESP_OK) ESP_LOGW(TAG, "nvs_set_u32(%s) failed: %s", key, esp_err_to_name(ret));
 }
 static void wr_i8(nvs_handle_t h, const char *key, int8_t val)
 {
@@ -237,6 +247,7 @@ static void apply_defaults(cam_config_t *cfg)
     cfg->timelapse_burst_count = 3;
     cfg->timelapse_mode = 0;             /* 0=静态 1=动态 */
     cfg->timelapse_min_interval_s = 3;
+    cfg->timelapse_min_interval_ms = 0;  /* 0=沿用 timelapse_min_interval_s*1000；设 83 可达 12fps */
     cfg->timelapse_max_interval_s = 300;
     cfg->timelapse_decay_factor = 2;
     cfg->timelapse_decay_period_s = 10;
@@ -453,6 +464,7 @@ static void load_keys_from_nvs(nvs_handle_t h, cam_config_t *cfg)
     rd_u8(h, "tl_burst", &cfg->timelapse_burst_count);
     rd_u8(h, "tl_mode", &cfg->timelapse_mode);
     rd_u16(h, "tl_min_int_s", &cfg->timelapse_min_interval_s);
+    rd_u32(h, "tl_min_ms", &cfg->timelapse_min_interval_ms);
     rd_u16(h, "tl_max_int_s", &cfg->timelapse_max_interval_s);
     rd_u8(h, "tl_decay_f", &cfg->timelapse_decay_factor);
     rd_u16(h, "tl_decay_p_s", &cfg->timelapse_decay_period_s);
@@ -527,6 +539,7 @@ static void write_keys_to_nvs(nvs_handle_t h, const cam_config_t *cfg)
     wr_u8(h, "tl_burst", cfg->timelapse_burst_count);
     wr_u8(h, "tl_mode", cfg->timelapse_mode);
     wr_u16(h, "tl_min_int_s", cfg->timelapse_min_interval_s);
+    wr_u32(h, "tl_min_ms", cfg->timelapse_min_interval_ms);
     wr_u16(h, "tl_max_int_s", cfg->timelapse_max_interval_s);
     wr_u8(h, "tl_decay_f", cfg->timelapse_decay_factor);
     wr_u16(h, "tl_decay_p_s", cfg->timelapse_decay_period_s);
@@ -1090,13 +1103,20 @@ bool config_validate(const cam_config_t *cfg)
                  cfg->timelapse_min_interval_s);
         return false;
     }
+    if (cfg->timelapse_min_interval_ms != 0 &&
+        (cfg->timelapse_min_interval_ms < 83 || cfg->timelapse_min_interval_ms > 3600000)) {
+        ESP_LOGW(TAG, "validate: timelapse_min_interval_ms=%lu out of 0 or 83-3600000",
+                 (unsigned long)cfg->timelapse_min_interval_ms);
+        return false;
+    }
     if (cfg->timelapse_max_interval_s < 1 || cfg->timelapse_max_interval_s > 3600) {
         ESP_LOGW(TAG, "validate: timelapse_max_interval_s=%d out of 1-3600",
                  cfg->timelapse_max_interval_s);
         return false;
     }
+    uint32_t eff_min_ms = cfg->timelapse_min_interval_ms ? cfg->timelapse_min_interval_ms : (uint32_t)cfg->timelapse_min_interval_s * 1000U;
     if (cfg->timelapse_enabled && cfg->timelapse_mode == 1 &&
-        cfg->timelapse_max_interval_s < cfg->timelapse_min_interval_s) {
+        (uint32_t)cfg->timelapse_max_interval_s * 1000U < eff_min_ms) {
         ESP_LOGW(TAG, "validate: tl max=%u < min=%u",
                  cfg->timelapse_max_interval_s, cfg->timelapse_min_interval_s);
         return false;
@@ -1311,6 +1331,7 @@ cJSON *config_get_json(void)
     cJSON_AddNumberToObject(root, "timelapse_burst_count", (double)cfg->timelapse_burst_count);
     cJSON_AddNumberToObject(root, "timelapse_mode", (double)cfg->timelapse_mode);
     cJSON_AddNumberToObject(root, "timelapse_min_interval_s", (double)cfg->timelapse_min_interval_s);
+    cJSON_AddNumberToObject(root, "timelapse_min_interval_ms", (double)cfg->timelapse_min_interval_ms);
     cJSON_AddNumberToObject(root, "timelapse_max_interval_s", (double)cfg->timelapse_max_interval_s);
     cJSON_AddNumberToObject(root, "timelapse_decay_factor", (double)cfg->timelapse_decay_factor);
     cJSON_AddNumberToObject(root, "timelapse_decay_period_s", (double)cfg->timelapse_decay_period_s);

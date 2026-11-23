@@ -866,7 +866,9 @@ static void recording_task(void *arg)
      * 逻辑：有运动 = min；每 decay_period_s 无运动 ×decay_factor，封顶 max）。
      * 运动信号 = motion_detector_is_active()（Core 1 异步任务滞回判定，
      * 最多滞后一个分析周期）——最小侵入钩子，无新增任务间耦合。 */
-    uint16_t cur_interval_s = cfg->timelapse_min_interval_s ? cfg->timelapse_min_interval_s : 1;
+    uint32_t min_tl_ms = cfg->timelapse_min_interval_ms ? cfg->timelapse_min_interval_ms
+                         : (cfg->timelapse_min_interval_s ? (uint32_t)cfg->timelapse_min_interval_s * 1000U : 1000U);
+    uint32_t cur_interval_ms = min_tl_ms;
     int64_t last_motion_us = esp_timer_get_time();
 
     bool segment_open = false;
@@ -904,29 +906,32 @@ static void recording_task(void *arg)
         int tl_delay_ms = 0;
         if (timelapse && !preview_active) {
             if (tl_dynamic) {
+                min_tl_ms = cfg->timelapse_min_interval_ms ? cfg->timelapse_min_interval_ms
+                            : (cfg->timelapse_min_interval_s ? (uint32_t)cfg->timelapse_min_interval_s * 1000U : 1000U);
+                uint32_t max_tl_ms = (uint32_t)(cfg->timelapse_max_interval_s ? cfg->timelapse_max_interval_s : 300U) * 1000U;
                 if (motion_detector_is_active()) {
-                    if (cur_interval_s != cfg->timelapse_min_interval_s) {
-                        ESP_LOGI(TAG, "Motion active, tl interval reset to %us",
-                                 cfg->timelapse_min_interval_s);
+                    if (cur_interval_ms != min_tl_ms) {
+                        ESP_LOGI(TAG, "Motion active, tl interval reset to %lums",
+                                 (unsigned long)min_tl_ms);
                     }
-                    cur_interval_s = cfg->timelapse_min_interval_s;
+                    cur_interval_ms = min_tl_ms;
                     last_motion_us = esp_timer_get_time();
                 } else {
                     int64_t elapsed_s = (esp_timer_get_time() - last_motion_us) / 1000000;
                     if (elapsed_s >= (int64_t)cfg->timelapse_decay_period_s) {
-                        uint16_t next = (uint16_t)(cur_interval_s * cfg->timelapse_decay_factor);
-                        if (next > cfg->timelapse_max_interval_s || next < cur_interval_s) {
-                            next = cfg->timelapse_max_interval_s;
+                        uint32_t next = cur_interval_ms * cfg->timelapse_decay_factor;
+                        if (next > max_tl_ms || next < cur_interval_ms) {
+                            next = max_tl_ms;
                         }
-                        if (next != cur_interval_s) {
-                            ESP_LOGI(TAG, "No motion for %llds, tl interval decayed %us->%us",
-                                     (long long)elapsed_s, cur_interval_s, next);
+                        if (next != cur_interval_ms) {
+                            ESP_LOGI(TAG, "No motion for %llds, tl interval decayed %lums->%lums",
+                                     (long long)elapsed_s, (unsigned long)cur_interval_ms, (unsigned long)next);
                         }
-                        cur_interval_s = next;
+                        cur_interval_ms = next;
                         last_motion_us = esp_timer_get_time();
                     }
                 }
-                tl_delay_ms = (cur_interval_s > 0 ? cur_interval_s : 1) * 1000;
+                tl_delay_ms = (int)(cur_interval_ms >= 83 ? cur_interval_ms : 83);
             } else {
                 tl_delay_ms = (cfg->timelapse_interval_s > 0)
                               ? cfg->timelapse_interval_s * 1000 : 30000;
@@ -1139,7 +1144,7 @@ static void recording_task(void *arg)
              * playable, correctly-sized AVI rather than a truncated/zero-
              * length file. Was 10 frames; 30 cuts periodic FAT sync I/O on
              * the shared SPI bus while keeping the loss window bounded. */
-            if (timelapse) {
+            if (timelapse && tl_delay_ms >= 1000) {
                 fflush(s_seg.fp);
                 fsync(fileno(s_seg.fp));
             } else if (++s_seg.flush_counter >= 30) {
@@ -1202,7 +1207,8 @@ static void recording_task(void *arg)
                 /* 预览按正常帧率出帧（延时摄影间隔对实时预览无意义） */
                 delay_ms = broker_frame_delay();
             } else if (timelapse) {
-                delay_ms = (tl_delay_ms > 0) ? tl_delay_ms : 1000;
+                int spent_ms = (int)((esp_timer_get_time() - cycle_start_us) / 1000);
+                delay_ms = (tl_delay_ms > spent_ms) ? (tl_delay_ms - spent_ms) : 1;
             } else {
                 delay_ms = broker_frame_delay();
             }

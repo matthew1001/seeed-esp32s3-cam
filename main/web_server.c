@@ -522,6 +522,7 @@ static esp_err_t api_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(data, "timelapse_burst_count", (double)cfg->timelapse_burst_count);
     cJSON_AddNumberToObject(data, "timelapse_mode", (double)cfg->timelapse_mode);
     cJSON_AddNumberToObject(data, "timelapse_min_interval_s", (double)cfg->timelapse_min_interval_s);
+    cJSON_AddNumberToObject(data, "timelapse_min_interval_ms", (double)cfg->timelapse_min_interval_ms);
     cJSON_AddNumberToObject(data, "timelapse_max_interval_s", (double)cfg->timelapse_max_interval_s);
     cJSON_AddNumberToObject(data, "timelapse_decay_factor", (double)cfg->timelapse_decay_factor);
     cJSON_AddNumberToObject(data, "timelapse_decay_period_s", (double)cfg->timelapse_decay_period_s);
@@ -891,6 +892,18 @@ static esp_err_t api_config_post_handler(httpd_req_t *req)
             return json_error(req, "Invalid timelapse_min_interval_s (must be 1-3600)", HTTPD_400_BAD_REQUEST);
         }
         cfg->timelapse_min_interval_s = (uint16_t)val;
+        if (!cJSON_GetObjectItem(json, "timelapse_min_interval_ms")) {
+            cfg->timelapse_min_interval_ms = 0;
+        }
+    }
+    if ((item = cJSON_GetObjectItem(json, "timelapse_min_interval_ms"))) {
+        int val = item->valueint;
+        if (val != 0 && !validate_uint_range(val, 83, 3600000)) {
+            cJSON_Delete(json);
+            config_unlock();
+            return json_error(req, "Invalid timelapse_min_interval_ms (must be 0 or 83-3600000)", HTTPD_400_BAD_REQUEST);
+        }
+        cfg->timelapse_min_interval_ms = (uint32_t)val;
     }
     if ((item = cJSON_GetObjectItem(json, "timelapse_max_interval_s"))) {
         int val = item->valueint;
@@ -899,7 +912,8 @@ static esp_err_t api_config_post_handler(httpd_req_t *req)
             config_unlock();
             return json_error(req, "Invalid timelapse_max_interval_s (must be 1-3600)", HTTPD_400_BAD_REQUEST);
         }
-        if (val < (int)cfg->timelapse_min_interval_s) {
+        uint32_t eff_min_ms = cfg->timelapse_min_interval_ms ? cfg->timelapse_min_interval_ms : (uint32_t)cfg->timelapse_min_interval_s * 1000U;
+        if ((uint32_t)val * 1000U < eff_min_ms) {
             cJSON_Delete(json);
             config_unlock();
             return json_error(req, "timelapse_max_interval_s must be >= timelapse_min_interval_s", HTTPD_400_BAD_REQUEST);
