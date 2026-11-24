@@ -1095,6 +1095,14 @@ static esp_err_t api_files_delete_handler(httpd_req_t *req)
     if (httpd_query_key_value(query, "name", name, sizeof(name)) != ESP_OK)
         return json_error(req, "Missing name parameter", HTTPD_400_BAD_REQUEST);
 
+    /* Decode %2F / %2f back to '/' so encoded subpaths like 2026-11%2F22%2Ffile.avi resolve */
+    for (char *s = name, *d = name; (*d = *s); s++, d++) {
+        if (s[0] == '%' && s[1] == '2' && (s[2] == 'F' || s[2] == 'f')) {
+            *d = '/';
+            s += 2;
+        }
+    }
+
     /* Path traversal protection — allow subdirectory slashes but block .. */
     if (strstr(name, ".."))
         return json_error(req, "Invalid name", HTTPD_400_BAD_REQUEST);
@@ -1338,7 +1346,7 @@ static esp_err_t api_download_handler(httpd_req_t *req)
     /* Cap at 4MB: protects against runaway downloads over slow WiFi. The
      * cap no longer needs a full-file PSRAM allocation (we stream), so it's
      * purely a request-size guard. */
-    if (file_size > 200 * 1024 * 1024) {
+    if ((uint64_t)file_size > 2048ULL * 1024ULL * 1024ULL) {
         return json_error(req, "File too large for download", HTTPD_400_BAD_REQUEST);
     }
 

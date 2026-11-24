@@ -377,38 +377,11 @@ static void upload_task(void *arg)
  */
 esp_err_t nas_uploader_init(void)
 {
-    if (s_initialized) {
-        return ESP_OK;
-    }
-
-    s_queue = xQueueCreate(UPLOAD_QUEUE_SIZE, PATH_BUF_SIZE);
-    if (!s_queue) {
-        ESP_LOGE(TAG, "Failed to create upload queue");
-        return ESP_FAIL;
-    }
-
-    s_file_mutex = xSemaphoreCreateMutex();
-    if (!s_file_mutex) {
-        ESP_LOGE(TAG, "Failed to create file mutex");
-        vQueueDelete(s_queue);
-        s_queue = NULL;
-        return ESP_FAIL;
-    }
-
-    BaseType_t ret = xTaskCreatePinnedToCore(upload_task, "upload",
-                                              6144, NULL, 3,
-                                              &s_task_handle, 1);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create upload task");
-        vQueueDelete(s_queue);
-        s_queue = NULL;
-        return ESP_FAIL;
-    }
-    /* Restore pending uploads from persistent queue */
-    persist_load();
-
-    s_initialized = true;
-    ESP_LOGI(TAG, "NAS uploader initialized (queue %d, core 1)", UPLOAD_QUEUE_SIZE);
+    /* Auto-upload disabled at compile time */
+    remove(QUEUE_FILE_PATH);
+    s_queue_count = 0;
+    s_initialized = false;
+    ESP_LOGI(TAG, "NAS uploader disabled at compile time");
     return ESP_OK;
 }
 
@@ -419,22 +392,7 @@ esp_err_t nas_uploader_init(void)
  */
 esp_err_t nas_uploader_enqueue(const char *filepath)
 {
-    if (!s_initialized || !s_queue) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    char buf[PATH_BUF_SIZE] = {0};
-    strncpy(buf, filepath, sizeof(buf) - 1);
-
-    persist_enqueue(filepath);
-
-    if (xQueueSend(s_queue, buf, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGW(TAG, "Upload queue full, %d entries queued", s_queue_count);
-        LOG_EVENT(LOG_EVENT_QUEUE_FULL, "queue_count=%d", s_queue_count);
-        return ESP_ERR_NO_MEM;
-    }
-
-    s_queue_count = (int)uxQueueMessagesWaiting(s_queue);
+    (void)filepath;
     return ESP_OK;
 }
 
