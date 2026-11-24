@@ -349,6 +349,10 @@ static void motion_task(void *arg)
          * motion_detector_is_active() 读取。 */
 
         fbroadcast_release(&msg);
+
+        /* Throttle motion detection to ~2 Hz (500 ms delay). Keeps Core 1
+         * cool, prevents frame drops, and gives IDLE1 ample time for WDT. */
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
     ESP_LOGI(TAG, "Motion detection task exiting");

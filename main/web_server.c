@@ -1338,7 +1338,7 @@ static esp_err_t api_download_handler(httpd_req_t *req)
     /* Cap at 4MB: protects against runaway downloads over slow WiFi. The
      * cap no longer needs a full-file PSRAM allocation (we stream), so it's
      * purely a request-size guard. */
-    if (file_size > 4 * 1024 * 1024) {
+    if (file_size > 200 * 1024 * 1024) {
         return json_error(req, "File too large for download", HTTPD_400_BAD_REQUEST);
     }
 
