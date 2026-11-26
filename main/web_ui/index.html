@@ -258,7 +258,19 @@
             <div class="usage-bar"><div class="usage-fill" id="sd-usage-fill" style="width:0%"></div></div>
             <div class="usage-text"><span id="sd-usage-text">--</span><span id="sd-usage-free">--</span></div>
           </div>
-          <div class="files-bar" id="files-bar" hidden>
+          <div class="field-row" id="row-rec-toggle" hidden>
+        <span class="field-label" data-i18n="storage.recording_toggle">Recording</span>
+        <div class="toggle" id="rec-toggle" role="switch" aria-checked="false" tabindex="0"></div>
+      </div>
+      <div class="field-row" id="row-timelapse-enabled" hidden>
+        <span class="field-label" data-i18n="storage.timelapse_enabled">Timelapse Mode</span>
+        <div class="toggle" id="timelapse-enabled" role="switch" aria-checked="false" tabindex="0"></div>
+      </div>
+      <div class="field-row" id="row-motion-enabled" hidden>
+        <span class="field-label" data-i18n="storage.motion_enabled">Motion Detection</span>
+        <div class="toggle" id="motion-enabled" role="switch" aria-checked="false" tabindex="0"></div>
+      </div>
+      <div class="files-bar" id="files-bar" hidden>
             <div class="mini-seg" id="files-type-seg">
               <button data-type="all" class="active" data-i18n="files.type_all">All</button>
               <button data-type="photos" data-i18n="files.type_photos">Photos</button>

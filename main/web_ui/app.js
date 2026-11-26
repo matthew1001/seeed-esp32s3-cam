@@ -207,7 +207,10 @@ function applyCapabilities() {
     if (Caps.ai) showSeg('ai');
     if (Caps.flash_led) showSeg('flash');
     if (Caps.sd) showSeg('storage');
-    if (Caps.recording) $('btn-record').hidden = false;
+    if (Caps.recording) {
+        $('btn-record').hidden = false;
+        if ($('row-rec-toggle')) $('row-rec-toggle').hidden = false;
+    }
     if (Caps.audio) $('btn-audio').hidden = false;
     if (Caps.websocket) WS.connect();
     if (Caps.ota) $('ota-panel').hidden = false;
@@ -367,6 +370,7 @@ async function pollStatus() {
         btn.innerHTML = icon(isRec ? 'stop' : 'record') +
             `<span>${window.i18n.t(isRec ? 'storage.stop' : 'storage.record')}</span>`;
     }
+    if ($('rec-toggle')) setToggle('rec-toggle', isRec);
 
     /* stats strip — 每个数值都带人话标签（普通人可读） */
     const chips = [];
@@ -699,7 +703,7 @@ function fileRow(f) {
         updateBatchButtons();
     });
     row.querySelector('.act-dl').addEventListener('click', () => {
-        let url = '/api/download?name=' + encodeURIComponent(f.name);
+        let url = '/api/download?name=' + f.name.split('/').map(encodeURIComponent).join('/');
         if (f.type) url += '&type=' + f.type;
         window.open(url, '_blank');
     });
@@ -979,6 +983,14 @@ async function loadConfig() {
         $('row-flash-viewers').hidden = false;
         setToggle('flash-viewers', d.flash_viewers);
     }
+    if (d.timelapse_enabled !== undefined && $('row-timelapse-enabled')) {
+        $('row-timelapse-enabled').hidden = false;
+        setToggle('timelapse-enabled', d.timelapse_enabled);
+    }
+    if (d.motion_enabled !== undefined && $('row-motion-enabled')) {
+        $('row-motion-enabled').hidden = false;
+        setToggle('motion-enabled', d.motion_enabled);
+    }
     /* 没有任何可编辑项时隐藏 Save（契约 v1.9：RTSP 免认证无凭据字段） */
     const anyEditable = !$('row-onvif-enable').hidden || !$('row-onvif-events').hidden || !$('row-csi-threshold').hidden;
     $('btn-streaming-save').hidden = !anyEditable;
@@ -994,6 +1006,20 @@ async function saveFlashViewers() {
         toast(window.i18n.t('toast.saved'), { type: 'success' });
     } catch (e) {
         toast(window.i18n.t('toast.error', { msg: e.message }), { type: 'error' });
+    }
+}
+
+async function saveStorageToggle(key, active) {
+    try {
+        await api('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [key]: active })
+        });
+        toast(window.i18n.t('toast.saved'), { type: 'success' });
+    } catch (e) {
+        toast(window.i18n.t('toast.save_failed', { msg: e.message }), { type: 'error' });
+        loadConfig();
     }
 }
 
@@ -1426,6 +1452,9 @@ const bootSPA = async () => {
     initToggle('onvif-enable', () => saveStreaming());
     initToggle('onvif-events', () => saveStreaming());
     initToggle('flash-viewers', () => saveFlashViewers());   /* 板级扩展 */
+    initToggle('rec-toggle', () => toggleRecord());
+    initToggle('timelapse-enabled', (active) => saveStorageToggle('timelapse_enabled', active));
+    initToggle('motion-enabled', (active) => saveStorageToggle('motion_enabled', active));
     initToggle('csi-enabled', () => saveStreaming());      /* 契约 v1.7 */
     initToggle('csi-auto-heal', () => saveStreaming());
     const csiThr = $('csi-threshold');
