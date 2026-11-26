@@ -29,6 +29,7 @@
 #include "status_led.h"
 
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #include "ff.h"  /* FatFs: f_getfree for free space query */
@@ -61,11 +62,22 @@ static uint64_t s_total_bytes_cached   = 0;  /* one-shot fill at mount */
 static int64_t  s_usage_delta_bytes    = 0;  /* +write/-delete delta since mount */
 static int64_t  s_last_f_getfree_us    = 0;  /* monotonic us of last f_getfree */
 
-/* ---- In-memory file cache (ring buffer) ---- */
-#define FILE_CACHE_SIZE  64  /* max cached file entries */
-static file_info_t s_file_cache[FILE_CACHE_SIZE];
+/* ---- In-memory file cache (ring buffer in PSRAM) ---- */
+#define FILE_CACHE_SIZE  1000  /* max cached file entries */
+#define FILE_SCAN_MAX    2000  /* max files scanned before sorting newest */
+static file_info_t *s_file_cache = NULL;
 static int s_file_cache_count = 0;
 static int s_file_cache_head = 0;  /* oldest entry index (for ring eviction) */
+
+static bool ensure_file_cache_alloc(void)
+{
+    if (s_file_cache) return true;
+    s_file_cache = (file_info_t *)heap_caps_calloc(FILE_CACHE_SIZE, sizeof(file_info_t), MALLOC_CAP_SPIRAM);
+    if (!s_file_cache) {
+        s_file_cache = (file_info_t *)calloc(FILE_CACHE_SIZE, sizeof(file_info_t));
+    }
+    return s_file_cache != NULL;
+}
 /* ---- internal helpers ---- */
 
 /* Forward declarations */
@@ -375,26 +387,36 @@ static void storage_rebuild_cache(void)
     }
     
     xSemaphoreTake(s_sd_mutex, portMAX_DELAY);
-    
-    /* Scan all .avi files into heap buffer (too large for stack) */
-    file_info_t *temp_files = malloc(FILE_CACHE_SIZE * sizeof(file_info_t));
+
+    if (!ensure_file_cache_alloc()) {
+        xSemaphoreGive(s_sd_mutex);
+        ESP_LOGE(TAG, "No PSRAM/heap for file cache");
+        return;
+    }
+
+    /* Scan .avi files into PSRAM buffer (too large for stack) */
+    file_info_t *temp_files = (file_info_t *)heap_caps_malloc(FILE_SCAN_MAX * sizeof(file_info_t), MALLOC_CAP_SPIRAM);
+    if (!temp_files) {
+        temp_files = (file_info_t *)malloc(FILE_SCAN_MAX * sizeof(file_info_t));
+    }
     if (!temp_files) {
         xSemaphoreGive(s_sd_mutex);
         ESP_LOGE(TAG, "No memory for file cache rebuild");
         return;
     }
     int count = 0;
-    list_files_recursive(RECORDINGS_PATH, temp_files, FILE_CACHE_SIZE, &count);
-    
+    list_files_recursive(RECORDINGS_PATH, temp_files, FILE_SCAN_MAX, &count);
+
     /* Sort files by name (oldest first) */
     qsort(temp_files, count, sizeof(file_info_t), compare_file_info);
-    
-    /* Copy to cache (truncate if too many) */
-    s_file_cache_count = (count < FILE_CACHE_SIZE) ? count : FILE_CACHE_SIZE;
+
+    /* Keep the newest FILE_CACHE_SIZE entries */
+    int start_idx = (count > FILE_CACHE_SIZE) ? (count - FILE_CACHE_SIZE) : 0;
+    s_file_cache_count = count - start_idx;
     for (int i = 0; i < s_file_cache_count; i++) {
-        s_file_cache[i] = temp_files[i];
+        s_file_cache[i] = temp_files[start_idx + i];
     }
-    free(temp_files);
+    heap_caps_free(temp_files);
     
     xSemaphoreGive(s_sd_mutex);
     
@@ -410,6 +432,10 @@ static void storage_rebuild_cache(void)
 void storage_register_file(const char *filepath, size_t size)
 {
     xSemaphoreTake(s_sd_mutex, portMAX_DELAY);
+    if (!ensure_file_cache_alloc()) {
+        xSemaphoreGive(s_sd_mutex);
+        return;
+    }
 
     int idx;
     if (s_file_cache_count < FILE_CACHE_SIZE) {
@@ -452,6 +478,10 @@ void storage_register_file(const char *filepath, size_t size)
 void storage_unregister_file(const char *name)
 {
     xSemaphoreTake(s_sd_mutex, portMAX_DELAY);
+    if (!s_file_cache) {
+        xSemaphoreGive(s_sd_mutex);
+        return;
+    }
     for (int i = 0; i < s_file_cache_count; i++) {
         if (strcmp(s_file_cache[i].name, name) == 0) {
             s_usage_delta_bytes -= s_file_cache[i].size;  /* track freed space */
@@ -476,7 +506,7 @@ int storage_list_files(file_info_t *files, int max_count)
 
     xSemaphoreTake(s_sd_mutex, portMAX_DELAY);
 
-    if (s_file_cache_count > 0) {
+    if (s_file_cache && s_file_cache_count > 0) {
         /* Serve from in-memory cache — zero SD card I/O */
         int count = s_file_cache_count < max_count ? s_file_cache_count : max_count;
         /* Return newest first (copy in reverse order) */

@@ -770,7 +770,7 @@ async function loadFiles(reset = true) {
     $('btn-files-more').hidden = true;
     try {
         const d = await api(`/api/files?type=${Files.type}&offset=${Files.offset}&limit=${Files.limit}`);
-        const files = d.files || [];
+        const files = (d.files || []).slice(0, 100);
         if (reset) listEl.innerHTML = '';
         if (d.total !== undefined) Files.total = d.total;
         /* 只有后端回报 total（ai-thinker）才真正分页；不支持 offset 的板

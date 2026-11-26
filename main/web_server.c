@@ -1053,9 +1053,10 @@ static esp_err_t api_config_post_handler(httpd_req_t *req)
 /** @brief 处理GET /api/files请求，返回SD卡录像文件列表（含文件名、大小、日期） */
 static esp_err_t api_files_get_handler(httpd_req_t *req)
 {
-    file_info_t *files = malloc(64 * sizeof(file_info_t));
+    file_info_t *files = heap_caps_malloc(1000 * sizeof(file_info_t), MALLOC_CAP_SPIRAM);
+    if (!files) files = malloc(1000 * sizeof(file_info_t));
     if (!files) return json_error(req, "No memory", HTTPD_500_INTERNAL_SERVER_ERROR);
-    int count = storage_list_files(files, 64);
+    int count = storage_list_files(files, 1000);
 
     cJSON *data = cJSON_CreateObject();
     cJSON *arr = cJSON_CreateArray();
