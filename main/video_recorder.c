@@ -1147,7 +1147,7 @@ static void recording_task(void *arg)
             break;
         }
 
-        if (write_to_sd) {
+        if (write_to_sd && tl_should_write) {
             total_bytes += jpeg_data_len;
 
             /* Sync to SD: every frame in timelapse (sparse), every ~30 frames
