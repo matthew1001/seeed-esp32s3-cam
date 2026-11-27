@@ -870,6 +870,7 @@ static void recording_task(void *arg)
                          : (cfg->timelapse_min_interval_s ? (uint32_t)cfg->timelapse_min_interval_s * 1000U : 1000U);
     uint32_t cur_interval_ms = min_tl_ms;
     int64_t last_motion_us = esp_timer_get_time();
+    int64_t last_sd_write_us = 0;
 
     bool segment_open = false;
     uint32_t total_bytes = 0;
@@ -913,6 +914,7 @@ static void recording_task(void *arg)
                     if (cur_interval_ms != min_tl_ms) {
                         ESP_LOGI(TAG, "Motion active, tl interval reset to %lums",
                                  (unsigned long)min_tl_ms);
+                        last_sd_write_us = 0; /* wake up SD write immediately */
                     }
                     cur_interval_ms = min_tl_ms;
                     last_motion_us = esp_timer_get_time();
@@ -1055,10 +1057,21 @@ static void recording_task(void *arg)
             continue;
         }
 
-        /* Write frame to AVI (only if recording to SD).
+        /* In dynamic timelapse, only write a frame to SD when tl_delay_ms has elapsed
+         * (or immediately on motion wake-up), while still feeding motion_task at 2 Hz. */
+        bool tl_should_write = true;
+        if (tl_dynamic && write_to_sd && last_sd_write_us > 0) {
+            int64_t since_write_ms = (cycle_start_us - last_sd_write_us) / 1000;
+            if (since_write_ms < (int64_t)tl_delay_ms) {
+                tl_should_write = false;
+            }
+        }
+
+        /* Write frame to AVI (only if recording to SD and due).
          * Normal (fb != NULL): enqueue to sd_writer_task for async SD write.
          * Fallback (holding_camera_fb): synchronous inline write. */
-        if (write_to_sd) {
+        if (write_to_sd && tl_should_write) {
+            last_sd_write_us = cycle_start_us;
             if (fb) {
                 /* Normal path: enqueue for async write */
                 write_msg_t wmsg = { .fb = fb, .capture_us = 0 };
@@ -1207,8 +1220,9 @@ static void recording_task(void *arg)
                 /* 预览按正常帧率出帧（延时摄影间隔对实时预览无意义） */
                 delay_ms = broker_frame_delay();
             } else if (timelapse) {
+                int target_ms = tl_dynamic ? (tl_delay_ms < 500 ? tl_delay_ms : 500) : tl_delay_ms;
                 int spent_ms = (int)((esp_timer_get_time() - cycle_start_us) / 1000);
-                delay_ms = (tl_delay_ms > spent_ms) ? (tl_delay_ms - spent_ms) : 1;
+                delay_ms = (target_ms > spent_ms) ? (target_ms - spent_ms) : 1;
             } else {
                 delay_ms = broker_frame_delay();
             }
