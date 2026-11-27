@@ -253,8 +253,8 @@ esp_err_t motion_detector_process(
     uint8_t score = compute_motion_score(s_prev_gray, temp_gray, pixel_thresh);
 
     /* Hysteresis */
-    uint8_t trigger_threshold = sensitivity / 2;
-    uint8_t release_threshold = sensitivity / 4;
+    uint8_t trigger_threshold = sensitivity / 8;
+    uint8_t release_threshold = sensitivity / 16;
 
     if (trigger_threshold == 0) trigger_threshold = 1;
     if (release_threshold == 0) release_threshold = 1;
