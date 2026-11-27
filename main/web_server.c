@@ -1017,6 +1017,14 @@ static esp_err_t api_config_post_handler(httpd_req_t *req)
                  prev_onvif_enable, cfg->onvif_enable);
     }
 
+    /* Dynamic timelapse motion detector hot-sync */
+    if (cfg->timelapse_enabled && cfg->timelapse_mode == 1) {
+        motion_detector_init();
+        motion_detector_start();
+    } else {
+        motion_detector_stop();
+    }
+
     /* CSI 键族热应用（契约 v1.7；csi_threshold 显式改 0=恢复自动，带重校准） */
     if (csi_changed) {
         if (cfg->csi_threshold == 0.0f && prev_csi_threshold > 0.0f) {

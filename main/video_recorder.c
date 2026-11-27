@@ -1296,6 +1296,10 @@ esp_err_t recorder_start(void)
     if (s_state == RECORDER_PREVIEW) {
         /* PIT-020：预览态下任务已在跑，仅切状态；循环下一轮按 write_to_sd
          * 重新开分段，避免任务重启造成流断流。 */
+        if (config_get()->timelapse_enabled && config_get()->timelapse_mode == 1) {
+            motion_detector_init();
+            motion_detector_start();
+        }
         s_state = RECORDER_RECORDING;
         xSemaphoreGive(s_mutex);
         ESP_LOGI(TAG, "Recording started (from preview)");
